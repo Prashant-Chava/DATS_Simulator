@@ -1,0 +1,527 @@
+Interface Design Description
+For 
+DATSMulti-Carrier Satellite Telemetry (MuST)RF Simulator
+(VERSION-1.0.0)
+1. Messages
+List of Messages
+S.no
+Message Type
+Source
+Destination
+Msg ID
+Trigger
+Section
+1
+RF Control
+Console (0x01)
+Simulator (0x02)
+0x01
+Operator Start / Stop RF button
+4.2
+2
+Set Mode
+Console (0x01)
+Simulator (0x02)
+0x02
+Operator Mode switch (Simulation / Radiation)
+4.3
+3
+Parameter Load / Carrier Configuration
+Console (0x01)
+Simulator (0x02)
+0x10
+Operator Apply Configuration (Carriers 1 to 12)
+4.1
+4
+IQ Stream Begin
+Console (0x01)
+Simulator (0x02)
+0x21
+Operator 'Send to Carrier N' action in Simulation
+4.4
+5
+IQ Stream Data
+Console (0x01)
+Simulator (0x02)
+0x20
+Active arbitrary baseband I/Q sample stream chunk
+4.5
+6
+IQ Stream End
+Console (0x01)
+Simulator (0x02)
+0x22
+Completion of arbitrary baseband I/Q sample stream
+4.6
+7
+Command Acknowledgment (ACK)
+Simulator (0x02)
+Console (0x01)
+Matches Cmd (Kind 0xBB)
+Positive ACK / Execution status response from hardware
+4.7
+Table 1: List of Messages
+2. Common Message Structure
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+SOP (0xB1B1B1B1)
+0
+Destination Id
+Source Id
+4
+Destination subsystem ID (0x00)
+Source subsystem ID (0x00)
+6
+Destination sub subsystem ID (0x00)
+Source sub subsystem ID (0x00)
+8
+Message Counter
+Command ID
+10
+Reserved
+Data/Ack
+12
+Timestamp (8 Byte)
+14
+Data Length
+22
+DATA PACKET
+24
+Checksum
+X-5
+EOP(0xE1E1E1E1)
+X-4
+Table 2: Common Frame Structure (29 + N Bytes)
+Description of the Message:
+Name of the field
+Size (bytes)
+Notes
+SOP
+4
+Start of Packet: Fixed 4-byte synchronization magic word 0xB1B1B1B1 (0xB1, 0xB1, 0xB1, 0xB1).
+Destination ID
+1
+CSCI ID of destination subsystem (0x02 = MuST/DATS RF Simulator, 0x01 = Console).
+Source ID
+1
+CSCI ID of source subsystem (0x01 = Operator Console, 0x02 = Simulator).
+Destination Subsystem ID
+1
+Destination subsystem identifier (default 0x00).
+Source Subsystem ID
+1
+Source subsystem identifier (default 0x00).
+Destination Sub-subsystem ID
+1
+Destination sub-subsystem identifier (default 0x00).
+Source Sub-subsystem ID
+1
+Source sub-subsystem identifier (default 0x00).
+Message Counter
+1
+Incremental frame sequence counter (0 to 255), incremented per transmitted frame.
+Command ID
+1
+Identifies the command type as defined in Table 1 (e.g. 0x01, 0x02, 0x10, 0x20, 0x21, 0x22).
+Reserved
+1
+Reserved byte for future protocol expansion (set to 0x00).
+Data / Ack (Packet Kind)
+1
+Packet classification flag: 0xAA = Command / Data packet, 0xBB = Acknowledgment (ACK).
+Timestamp
+8
+64-bit integer representing elapsed seconds since Unix epoch (00:00:00 UTC on 1 January 1970), Big-Endian.
+Data Length (N)
+2
+16-bit unsigned integer representing length of the Data Packet payload in bytes (Big-Endian).
+Data Packet (Payload)
+N
+Command-specific payload data (length N bytes as specified in the Data Length field).
+Checksum
+1
+8-bit XOR checksum computed across all bytes from SOP (byte 0) through end of Data Packet (byte 23+N).
+EOP
+4
+End of Packet: Fixed 4-byte termination magic word 0xE1E1E1E1 (0xE1, 0xE1, 0xE1, 0xE1).
+Table 3: Field Description of Common Frame Structure
+3. Port, Protocol and Network Configuration
+Interface
+Protocol
+IP Address
+Port
+RFSoC Simulator Hardware (PS GEM Ethernet)
+TCP (lwIP server)
+192.168.1.10 (Default static IP)
+7000
+RFSoC Simulator Hardware (Alternative Link)
+UDP (lwIP server)
+192.168.1.10 (Default static IP)
+7000
+Offline Simulator / Mock Hardware Device
+TCP / UDP
+127.0.0.1 (Local loopback)
+7000
+Operator Workstation Host PC NIC
+TCP / UDP Client
+192.168.1.x / 24 subnet (e.g. 192.168.1.100)
+Ephemeral / Dynamic
+Operator Web Console UI & REST API Server
+HTTP / WebSocket
+127.0.0.1 / localhost
+8765
+Table 4: Port, Protocol and Network Configuration
+4. Message Description
+4.1 Parameter Load / Carrier Configuration Command (Msg ID: 0x10)
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+Carrier Number (uint8: 1 to 12)
+Carrier Enable (uint8: 0=Off, 1=On)
+0
+Waveform Code (uint8: 0 to 4)
+Bit Rate kbps [MSB] (uint16)
+2
+Bit Rate kbps [LSB]
+Subcarrier kHz [MSB] (uint16)
+4
+Subcarrier kHz [LSB]
+PCM Code (uint8: 0=NRZ-L, 1=NRZ-S)
+6
+Convolutional Coding (uint8: 0=Off, 1=On)
+Frame Length bytes [MSB] (uint16)
+8
+Frame Length bytes [LSB]
+Frequency Offset Hz [Byte 3 / MSB] (int32)
+10
+Frequency Offset Hz [Byte 2, Byte 1] (int32)
+12
+Frequency Offset Hz [Byte 0 / LSB]
+Output Power dBm [MSB] (int16)
+14
+Output Power dBm [LSB]
+Reserved / Padding (0x00)
+16
+Table 5: Frame Layout of Parameter Load / Carrier Configuration Command (17 Bytes)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+Carrier Number
+1
+1 to 12
+Target carrier channel index to configure.
+Carrier Enable
+1
+0: Disabled, 1: Enabled
+Switches carrier RF transmission on or off.
+Waveform / Modulation
+1
+0: PCM/FSK1: PCM/PSK2: PCM/PSK/PM3: CDMA4: IQ Data
+Selects the active modulation waveform type.
+Bit Rate
+2
+4, 16, 32, 64, 128, 256, 512, 1024, 2048
+Data transmission rate in kbps (Big-Endian uint16). Used for PCM/FSK, PCM/PSK, PCM/PSK/PM, CDMA.
+Subcarrier Frequency
+2
+32 to 256
+Subcarrier frequency in kHz (Big-Endian uint16). Required for PCM/PSK/PM; set to 0 when not applicable.
+PCM Code
+1
+0: NRZ-L1: NRZ-S
+Pulse Code Modulation line code format.
+Convolutional Coding
+1
+0: Disabled, 1: Enabled
+Forward Error Correction: Rate 1/2, constraint length k=7 (standard for satellite telemetry).
+Frame Length
+2
+128 to 256
+Telemetry data frame length in bytes (Big-Endian uint16).
+Frequency Offset
+4
+-50,000,000 to +50,000,000
+Carrier center frequency offset in Hz (Big-Endian signed 32-bit int), relative to nominal 2.25 GHz center.
+Output Power
+2
+-150 to +20
+Carrier output power in dBm (Big-Endian signed 16-bit int) in 1 dB steps.
+Table 6: Field Description of Parameter Load / Carrier Configuration Command
+4.2 RF Control Command (Msg ID: 0x01)
+The RF Control command starts or stops the RFSoC Digital-to-Analog Converter (DAC) output transmissions. In Radiation Mode, the host operator interface requires an explicit safety confirmation prior to initiating RF radiation.
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+RF Output State (uint8: 0=Stop RF, 1=Start RF)
+Reserved / Padding (0x00)
+0
+Table 7: Frame Layout of RF Control Command (1 Byte Payload)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+RF Output State
+1
+0x00: Stop RF0x01: Start RF
+0x00 shuts down/mutes RF DAC outputs; 0x01 enables DAC transmission.
+Table 8: Field Description of RF Control Command
+4.3 Mode Selection Command (Msg ID: 0x02)
+The Mode Selection command toggles the simulator between Simulation Mode and Radiation Mode. In Simulation Mode, the operator can load captured waveforms (e.g. Vivado ILA CSV or I/Q files), inspect time-domain signals, spectrum, and constellations, and stream samples to any carrier. In Radiation Mode, DACs transmit over-the-air with safety interlocks.
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+Operating Mode (uint8: 0=Simulation, 1=Radiation)
+Reserved / Padding (0x00)
+0
+Table 9: Frame Layout of Mode Selection Command (1 Byte Payload)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+Operating Mode
+1
+0x00: Simulation Mode0x01: Radiation Mode
+0x00 enables offline/streamed waveform simulation; 0x01 enables over-the-air RF radiation mode.
+Table 10: Field Description of Mode Selection Command
+4.4 IQ Stream Begin Command (Msg ID: 0x21)
+The IQ Stream Begin command prepares the target carrier on the RFSoC simulator to receive an arbitrary baseband sample stream. It declares the baseband sample rate and total sample count expected.
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+Carrier Number (uint8: 1 to 12)
+Sample Rate Hz [Byte 3 / MSB] (uint32)
+0
+Sample Rate Hz [Byte 2, Byte 1] (uint32)
+2
+Sample Rate Hz [Byte 0 / LSB]
+Total Samples [Byte 3 / MSB] (uint32)
+4
+Total Samples [Byte 2, Byte 1] (uint32)
+6
+Total Samples [Byte 0 / LSB]
+Reserved / Padding (0x00)
+8
+Table 11: Frame Layout of IQ Stream Begin Command (9 Bytes Payload)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+Carrier Number
+1
+1 to 12
+Target carrier channel on which baseband I/Q samples will be played.
+Sample Rate
+4
+1 to 100,000,000
+Baseband sampling rate in Hz (Big-Endian uint32).
+Total Samples
+4
+1 to 4,294,967,295
+Total number of complex (I, Q) sample pairs in the upcoming stream (Big-Endian uint32).
+Table 12: Field Description of IQ Stream Begin Command
+4.5 IQ Stream Data Command (Msg ID: 0x20)
+The IQ Stream Data command transfers a chunk of interleaved 16-bit signed I and Q baseband samples to the target carrier. Chunks are numbered sequentially, and each packet contains up to 1024 sample pairs.
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+Carrier Number (uint8: 1 to 12)
+Chunk Sequence Number [Byte 3 / MSB] (uint32)
+0
+Chunk Sequence Number [Byte 2, Byte 1] (uint32)
+2
+Chunk Sequence Number [Byte 0 / LSB]
+Sample Count N [MSB] (uint16)
+4
+Sample Count N [LSB]
+I[0] Sample [MSB] (int16)
+6
+I[0] Sample [LSB]
+Q[0] Sample [MSB] (int16)
+8
+...
+...
+...
+I[N-1] Sample (int16)
+Q[N-1] Sample (int16)
+7 + 4*(N-1)
+Table 13: Frame Layout of IQ Stream Data Command (7 + 4*N Bytes Payload)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+Carrier Number
+1
+1 to 12
+Target carrier channel.
+Chunk Sequence Number
+4
+0, 1, 2, ...
+Zero-based sequential chunk counter (Big-Endian uint32).
+Sample Count (N)
+2
+1 to 1024
+Number of complex (I, Q) sample pairs contained in this packet (Big-Endian uint16).
+Interleaved I/Q Samples
+4*N
+-32768 to +32767
+N pairs of 16-bit signed integers in big-endian byte order: I0, Q0, I1, Q1, ..., I[N-1], Q[N-1].
+Table 14: Field Description of IQ Stream Data Command
+4.6 IQ Stream End Command (Msg ID: 0x22)
+The IQ Stream End command notifies the RFSoC simulator firmware that all sample chunks for the specified carrier have been transmitted, indicating the total number of chunks sent.
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+Carrier Number (uint8: 1 to 12)
+Total Chunks [Byte 3 / MSB] (uint32)
+0
+Total Chunks [Byte 2, Byte 1] (uint32)
+2
+Total Chunks [Byte 0 / LSB]
+Reserved / Padding (0x00)
+4
+Table 15: Frame Layout of IQ Stream End Command (5 Bytes Payload)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+Carrier Number
+1
+1 to 12
+Target carrier channel.
+Total Chunks
+4
+1 to 4,294,967,295
+Total number of IQ_DATA chunks successfully transmitted (Big-Endian uint32).
+Table 16: Field Description of IQ Stream End Command
+4.7 Command Acknowledgment Frame (ACK, Packet Kind: 0xBB)
+The simulator answers every valid received command with an Acknowledge (ACK) frame within the configured ACK timeout (default: 2.0 s). In the ACK frame header, Destination ID and Source ID are reversed (Destination=0x01, Source=0x02), Message Counter matches the command sequence counter, Packet Kind is set to 0xBB, and Command ID matches the received command. The single-byte payload reports the execution status code.
+W00
+W01
+W02
+W03
+W04
+W05
+W06
+W07
+W08
+W09
+W10
+W11
+W12
+W13
+W14
+W15
+BYTE
+Execution Status Code (uint8: 0=OK, Non-zero=Error)
+Reserved / Padding (0x00)
+0
+Table 17: Frame Layout of Acknowledge Frame (1 Byte Payload)
+Name of the field
+Size (byte)
+Value / Range
+Notes
+Execution Status Code
+1
+0x00: Success / OK0x01: Invalid Parameter0x02: Checksum Mismatch0x03: State Error
+0x00 indicates valid frame receipt and successful hardware execution; non-zero values denote error rejection.
+Table 18: Field Description of Acknowledge Frame
