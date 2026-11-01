@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import struct
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +38,7 @@ MODE_VALUE = {"simulation": 0, "radiation": 1}
 
 @dataclass
 class Config:
-    byte_order: str = "big"
+    byte_order: str = "little"
     ack_timeout_s: float = 2.0
     ids: dict = field(default_factory=dict)
     commands: dict = field(default_factory=dict)
@@ -107,7 +108,43 @@ def set_mode(mode: str) -> bytes:
     return bytes([MODE_VALUE[mode]])
 
 
-def carrier_config(c: Carrier, order: str) -> bytes:
+def carrier_config(c: Carrier, order: str = "little") -> bytes:
+    """Pack carrier configuration matching VHDL registers (custom_reg_bridge.vhd / custom_control.h).
+
+    9 registers (36 bytes total, 32-bit LE each):
+      0x00: REG_ENABLE (1 if enabled else 0)
+      0x04: REG_SUBCARRIER_PHASE_INC (FCW = (f_sub / f_clk) * 2^32, f_clk = 100 MHz)
+      0x08: REG_MOD_SEL (waveform code)
+      0x0C: REG_CDMA_ENABLE (1 if cdma else 0)
+      0x10: REG_BIT_RATE_SEL (bit rate in kbps)
+      0x14: REG_PCM_MODE (0 for NRZ-L, 1 for NRZ-S)
+      0x18: REG_NRZ_MODE (0 for NRZ-L, 1 for NRZ-S)
+      0x1C: REG_FRAME_LEN_SEL (frame length: 128 / 256)
+      0x20: REG_MOD_INDEX_SCALE (power/scale)
+    """
+    endian = "<" if order == "little" else ">"
+    wf = WAVEFORMS[c.waveform]
+    f_clk = 100_000_000
+    subcarrier_hz = c.subcarrier_khz * 1000
+    phase_inc = int(round((subcarrier_hz / f_clk) * (1 << 32))) & 0xFFFFFFFF
+    cdma_enable = 1 if c.waveform == "cdma" else 0
+    pcm_val = PCM_CODE_VALUE[c.pcm_code]
+    return struct.pack(
+        f"{endian}8Ii",
+        1 if c.enabled else 0,
+        phase_inc,
+        wf["code"],
+        cdma_enable,
+        c.bit_rate_kbps,
+        pcm_val,
+        pcm_val,
+        c.frame_length,
+        c.power_dbm,
+    )
+
+
+def carrier_config_idd(c: Carrier, order: str = "little") -> bytes:
+    """Legacy 17-byte IDD table format."""
     wf = WAVEFORMS[c.waveform]
     return (
         bytes([c.number, 1 if c.enabled else 0, wf["code"]])
@@ -140,23 +177,106 @@ def iq_end(carrier: int, total_chunks: int, order: str) -> bytes:
     return bytes([carrier]) + _u(total_chunks, 4, order)
 
 
-# ---------------------------------------------------------------- decoders
-def decode_carrier(payload: bytes, order: str) -> dict:
-    if len(payload) != 17:
-        raise ValueError(f"CARRIER_CONFIG should be 17 bytes, got {len(payload)}")
-    wf_by_code = {v["code"]: k for k, v in WAVEFORMS.items()}
-    return dict(
-        number=payload[0],
-        enabled=bool(payload[1]),
-        waveform=wf_by_code.get(payload[2], f"code {payload[2]}"),
-        bit_rate_kbps=int.from_bytes(payload[3:5], order),
-        subcarrier_khz=int.from_bytes(payload[5:7], order),
-        pcm_code="NRZ-S" if payload[7] == 1 else "NRZ-L",
-        conv_coding=bool(payload[8]),
-        frame_length=int.from_bytes(payload[9:11], order),
-        freq_offset_hz=int.from_bytes(payload[11:15], order, signed=True),
-        power_dbm=int.from_bytes(payload[15:17], order, signed=True),
+def ddc_pulse_data(
+    pulse_id: int,
+    channel_id: int,
+    frequency_id: int,
+    sample_offset: int,
+    samples_per_block: int,
+    i_samples,
+    q_samples,
+    order: str = "little",
+) -> bytes:
+    """Encode Command 0x31 (DDC pulse data) payload (14-byte sub-header + float32 I/Q)."""
+    endian = "<" if order == "little" else ">"
+    header = struct.pack(
+        f"{endian}IBBII",
+        pulse_id,
+        channel_id,
+        frequency_id,
+        sample_offset,
+        samples_per_block,
     )
+    n = len(i_samples)
+    if n != len(q_samples):
+        raise ValueError(f"i_samples and q_samples length mismatch: {n} vs {len(q_samples)}")
+    iq_interleaved = []
+    for i_val, q_val in zip(i_samples, q_samples):
+        iq_interleaved.append(float(i_val))
+        iq_interleaved.append(float(q_val))
+    return header + struct.pack(f"{endian}{2 * n}f", *iq_interleaved)
+
+
+# ---------------------------------------------------------------- decoders
+def decode_ddc_pulse_data(payload: bytes, order: str = "little") -> dict:
+    """Decode Command 0x31 (DDC pulse data) payload."""
+    endian = "<" if order == "little" else ">"
+    if len(payload) < 14:
+        raise ValueError(f"DDC pulse data payload too short: {len(payload)} bytes, minimum 14")
+    pulse_id, channel_id, frequency_id, sample_offset, samples_per_block = struct.unpack_from(
+        f"{endian}IBBII", payload, 0
+    )
+    sample_bytes = payload[14:]
+    if len(sample_bytes) % 8 != 0:
+        raise ValueError(f"Malformed I/Q sample bytes: length {len(sample_bytes)} not divisible by 8")
+    num_samples = len(sample_bytes) // 8
+    raw_floats = struct.unpack(f"{endian}{2 * num_samples}f", sample_bytes)
+    i_samples = raw_floats[0::2]
+    q_samples = raw_floats[1::2]
+    return {
+        "pulse_id": pulse_id,
+        "channel_id": channel_id,
+        "frequency_id": frequency_id,
+        "sample_offset": sample_offset,
+        "samples_per_block": samples_per_block,
+        "num_samples": num_samples,
+        "i_samples": i_samples,
+        "q_samples": q_samples,
+    }
+def decode_carrier(payload: bytes, order: str = "little") -> dict:
+    endian = "<" if order == "little" else ">"
+    wf_by_code = {v["code"]: k for k, v in WAVEFORMS.items()}
+    if len(payload) == 36:
+        # VHDL 9-register format (36 bytes: 9 x 32-bit registers)
+        regs = struct.unpack(f"{endian}8Ii", payload)
+        enabled = bool(regs[0])
+        phase_inc = regs[1]
+        f_clk = 100_000_000
+        subcarrier_khz = int(round((phase_inc * f_clk) / (1 << 32) / 1000))
+        wf_code = regs[2]
+        waveform = "cdma" if regs[3] else wf_by_code.get(wf_code, f"code {wf_code}")
+        bit_rate_kbps = regs[4]
+        pcm_code = "NRZ-S" if regs[5] == 1 else "NRZ-L"
+        frame_length = regs[7]
+        power_dbm = regs[8]
+        return dict(
+            number=1,
+            enabled=enabled,
+            waveform=waveform,
+            bit_rate_kbps=bit_rate_kbps,
+            subcarrier_khz=subcarrier_khz,
+            pcm_code=pcm_code,
+            conv_coding=True,
+            frame_length=frame_length,
+            freq_offset_hz=0,
+            power_dbm=power_dbm,
+            phase_inc=phase_inc,
+        )
+    elif len(payload) == 17:
+        return dict(
+            number=payload[0],
+            enabled=bool(payload[1]),
+            waveform=wf_by_code.get(payload[2], f"code {payload[2]}"),
+            bit_rate_kbps=int.from_bytes(payload[3:5], order),
+            subcarrier_khz=int.from_bytes(payload[5:7], order),
+            pcm_code="NRZ-S" if payload[7] == 1 else "NRZ-L",
+            conv_coding=bool(payload[8]),
+            frame_length=int.from_bytes(payload[9:11], order),
+            freq_offset_hz=int.from_bytes(payload[11:15], order, signed=True),
+            power_dbm=int.from_bytes(payload[15:17], order, signed=True),
+        )
+    else:
+        raise ValueError(f"CARRIER_CONFIG should be 36 bytes (VHDL) or 17 bytes (IDD), got {len(payload)}")
 
 
 decode_channel = decode_carrier
@@ -182,6 +302,12 @@ def describe(name: str | None, payload: bytes, order: str) -> str:
             return f"IQ data carrier {payload[0]} chunk {int.from_bytes(payload[1:5], order)} ({int.from_bytes(payload[5:7], order)} samples)"
         if name == "IQ_END":
             return f"IQ end carrier {payload[0]}, {int.from_bytes(payload[1:5], order)} chunks"
+        if name in ("DDC_PULSE_DATA", "DDC_DATA") or name in ("0x31", "49"):
+            d = decode_ddc_pulse_data(payload, order)
+            return (
+                f"Pulse #{d['pulse_id']} Ch {d['channel_id']} Freq {d['frequency_id']} "
+                f"Offset {d['sample_offset']}/{d['samples_per_block']} ({d['num_samples']} samples)"
+            )
     except Exception:  # a malformed payload must never break logging
         return "Malformed data packet"
     return f"{len(payload)} data bytes"

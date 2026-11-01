@@ -32,13 +32,13 @@ def ack_for(f: Frame) -> bytes:
             payload=b"\x00",
             counter=f.counter,
             kind=KIND_ACK,
-            dest_id=f.src_id,
             src_id=f.dest_id,
-            dest_sub=f.src_sub,
+            dest_id=f.src_id,
             src_sub=f.dest_sub,
-            dest_subsub=f.src_subsub,
+            dest_sub=f.src_sub,
             src_subsub=f.dest_subsub,
-            timestamp=int(time.time()),
+            dest_subsub=f.src_subsub,
+            timestamp=time.time_ns(),
         ),
         ARGS.byte_order,
     )
@@ -72,6 +72,9 @@ class Device:
             ch = f.payload[0]
             st = self.iq.get(ch, {})
             return f"IQ end carrier {ch}: received {st.get('samples')} samples in {st.get('chunks')} chunks (expected {st.get('expect')})"
+        elif name in ("DDC_PULSE_DATA", "DDC_DATA") or f.command_id == 0x31:
+            d = cmd.decode_ddc_pulse_data(f.payload, order)
+            return f"DDC Pulse #{d['pulse_id']} Ch {d['channel_id']} Freq {d['frequency_id']} ({d['num_samples']} samples)"
         return cmd.describe(name, f.payload, order)
 
 

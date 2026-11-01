@@ -98,15 +98,22 @@ def test_carrier_payload_roundtrip_signed_offset_both_byte_orders():
     for off, pwr, num in test_cases:
         c, _ = spec.normalize_carrier(carrier(number=num, waveform="pcm_psk_pm", subcarrier_khz=200, pcm_code="NRZ-S", power_dbm=pwr, freq_offset_hz=off))
         for order in ("big", "little"):
+            # VHDL 9-register layout (36 bytes)
             payload = cmd.carrier_config(c, order)
-            assert len(payload) == 17, f"Payload must be 17 bytes, got {len(payload)}"
+            assert len(payload) == 36, f"Payload must be 36 bytes, got {len(payload)}"
             d = cmd.decode_carrier(payload, order)
-            assert d["number"] == num
-            assert d["freq_offset_hz"] == off
             assert d["power_dbm"] == pwr
             assert d["waveform"] == "pcm_psk_pm"
             assert d["pcm_code"] == "NRZ-S"
             assert d["subcarrier_khz"] == 200
+
+            # Legacy IDD layout (17 bytes)
+            idd_payload = cmd.carrier_config_idd(c, order)
+            assert len(idd_payload) == 17
+            d_idd = cmd.decode_carrier(idd_payload, order)
+            assert d_idd["number"] == num
+            assert d_idd["freq_offset_hz"] == off
+            assert d_idd["power_dbm"] == pwr
 
 
 def test_iq_payload_sizes():
@@ -117,8 +124,34 @@ def test_iq_payload_sizes():
 
 def test_default_command_table_loads():
     c = cmd.load_config()
-    assert c.commands["CARRIER_CONFIG"] == 16 and c.byte_order == "big"
+    assert c.commands["CARRIER_CONFIG"] == 16 and c.byte_order == "little"
+    assert c.commands["DDC_PULSE_DATA"] == 49
     assert c.command_name(1) == "RF_CONTROL"
+
+
+def test_ddc_pulse_data_roundtrip():
+    i_samples = [1.25, -0.5, 0.0]
+    q_samples = [0.75, 2.0, -1.5]
+    payload = cmd.ddc_pulse_data(
+        pulse_id=42,
+        channel_id=3,
+        frequency_id=2,
+        sample_offset=100,
+        samples_per_block=1000,
+        i_samples=i_samples,
+        q_samples=q_samples,
+        order="little",
+    )
+    assert len(payload) == 14 + len(i_samples) * 8
+    decoded = cmd.decode_ddc_pulse_data(payload, order="little")
+    assert decoded["pulse_id"] == 42
+    assert decoded["channel_id"] == 3
+    assert decoded["frequency_id"] == 2
+    assert decoded["sample_offset"] == 100
+    assert decoded["samples_per_block"] == 1000
+    assert decoded["num_samples"] == 3
+    assert pytest.approx(decoded["i_samples"]) == i_samples
+    assert pytest.approx(decoded["q_samples"]) == q_samples
 
 
 def test_default_carriers_respect_limits():

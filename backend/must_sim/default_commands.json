@@ -1,14 +1,14 @@
 {
-  "_note": "PLACEHOLDER Command IDs. Replace with the values from the IDD 'Command ID table IV' when available, then press 'Reload command table' in the app (or restart). IDs are decimal.",
-  "byte_order": "big",
+  "_note": "Command IDs. IDs are decimal.",
+  "byte_order": "little",
   "ack_timeout_s": 2.0,
   "ids": {
-    "destination": 2,
     "source": 1,
-    "destination_subsystem": 0,
+    "destination": 2,
     "source_subsystem": 0,
-    "destination_subsubsystem": 0,
-    "source_subsubsystem": 0
+    "destination_subsystem": 0,
+    "source_subsubsystem": 0,
+    "destination_subsubsystem": 0
   },
   "commands": {
     "RF_CONTROL": 1,
@@ -16,6 +16,7 @@
     "CARRIER_CONFIG": 16,
     "IQ_DATA": 32,
     "IQ_BEGIN": 33,
-    "IQ_END": 34
+    "IQ_END": 34,
+    "DDC_PULSE_DATA": 49
   }
 }

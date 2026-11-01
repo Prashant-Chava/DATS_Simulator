@@ -228,13 +228,13 @@ class Link:
             payload=payload,
             counter=counter,
             kind=KIND_DATA,
-            dest_id=i.get("destination", 2),
             src_id=i.get("source", 1),
-            dest_sub=i.get("destination_subsystem", 0),
+            dest_id=i.get("destination", 2),
             src_sub=i.get("source_subsystem", 0),
-            dest_subsub=i.get("destination_subsubsystem", 0),
+            dest_sub=i.get("destination_subsystem", 0),
             src_subsub=i.get("source_subsubsystem", 0),
-            timestamp=int(time.time()),
+            dest_subsub=i.get("destination_subsubsystem", 0),
+            timestamp=time.time_ns(),
         )
         raw = encode(frame, self.byte_order)
 

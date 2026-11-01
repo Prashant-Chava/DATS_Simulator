@@ -20,7 +20,7 @@ class MockServer:
 
     def __init__(self, no_ack=False):
         mock_device.ARGS.no_ack = no_ack
-        mock_device.ARGS.byte_order = "big"
+        mock_device.ARGS.byte_order = "little"
         mock_device.EVENTS.clear()
         self.ready = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
